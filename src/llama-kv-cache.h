@@ -151,6 +151,9 @@ public:
     void state_write(llama_io_write_i & io, llama_seq_id seq_id = -1, llama_state_seq_flags flags = 0) const override;
     void state_read (llama_io_read_i  & io, llama_seq_id seq_id = -1, llama_state_seq_flags flags = 0) override;
 
+    // see swa_keep_all
+    void set_swa_keep_all(bool value) { swa_keep_all = value; }
+
     //
     // llama_kv_cache specific API
     //
@@ -273,6 +276,9 @@ private:
 
     // required padding
     const uint32_t n_pad = 1;
+
+    // full-size SWA cache (--swa-full): do not recycle or skip cells outside the window, the attention mask still uses n_swa
+    bool swa_keep_all = false;
 
     // SWA
     const uint32_t n_swa = 0;

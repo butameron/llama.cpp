@@ -1073,8 +1073,8 @@ llama_kv_cache::slot_info llama_kv_cache::find_slot(const llama_ubatch & ubatch,
                     if (!can_use) {
                         const llama_seq_id seq_id_cell = cells.seq_get(idx);
 
-                        // SWA mask
-                        if (llama_hparams::is_masked_swa(n_swa, swa_type, pos_cell, cells.seq_pos_max(seq_id_cell) + 1)) {
+                        // SWA mask (never recycle masked cells in a full-size SWA cache)
+                        if (!swa_keep_all && llama_hparams::is_masked_swa(n_swa, swa_type, pos_cell, cells.seq_pos_max(seq_id_cell) + 1)) {
                             can_use = true;
                         }
                     }
@@ -2097,8 +2097,8 @@ void llama_kv_cache::state_write(llama_io_write_i & io, llama_seq_id seq_id, lla
             add_cell = add_cell && !cells.is_empty(i);
             add_cell = add_cell && (seq_id == -1 || cells.seq_has(i, seq_id));
 
-            // check the cell is not SWA-masked
-            if (add_cell && seq_id != -1) {
+            // check the cell is not SWA-masked (a full-size SWA cache writes every cell)
+            if (add_cell && seq_id != -1 && !swa_keep_all) {
                 const bool is_masked = llama_hparams::is_masked_swa(n_swa, swa_type, cells.pos_get(i), cells.seq_pos_max(seq_id));
 
                 add_cell = !is_masked;

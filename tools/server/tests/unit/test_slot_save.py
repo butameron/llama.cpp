@@ -789,3 +789,72 @@ def test_slot_restore_checkpoints_draft_kv_type_change(swa_server, ctkd_restore)
     })
     assert res.status_code == 200
     assert res.body["timings"]["prompt_n"] == n_live
+
+
+# with --swa-full the SWA cache keeps every cell, so a restored slot must reuse a prefix that ends before the SWA window
+def test_slot_restore_swa_full_reuses_prefix_beyond_window(swa_server):
+    server = swa_server
+    server.swa_full = True
+    # shrink the window below the prompt length
+    server.override_kv = ["gemma3.attention.sliding_window=int:64"]
+    server.start()
+
+    common = "The quick brown fox jumps over the lazy dog. " * 10
+    prompt_a = common + "The first ending of this story is a happy one. " * 10
+    prompt_b = common + "But the second ending was different and sad. " * 10
+
+    res = server.make_request("POST", "/completion", data={
+        "prompt": prompt_a,
+        "id_slot": 1,
+        "cache_prompt": True,
+    })
+    assert res.status_code == 200
+    n_full = res.body["timings"]["prompt_n"]
+
+    res = server.make_request("POST", "/completion", data={
+        "prompt": prompt_b,
+        "id_slot": 1,
+        "cache_prompt": True,
+    })
+    assert res.status_code == 200
+    n_live = res.body["timings"]["prompt_n"]
+    cache_live = res.body["timings"]["cache_n"]
+    assert 0 < cache_live < n_full
+    assert n_live > 64  # the divergence is deeper than the SWA window
+
+    res = server.make_request("POST", "/slots/1?action=erase")
+    assert res.status_code == 200
+
+    res = server.make_request("POST", "/completion", data={
+        "prompt": prompt_a,
+        "id_slot": 1,
+        "cache_prompt": True,
+    })
+    assert res.status_code == 200
+
+    res = server.make_request("POST", "/slots/1?action=save", data={
+        "filename": "swa_full_slot1.bin",
+    })
+    assert res.status_code == 200
+    assert res.body["n_saved"] > 0
+
+    res = server.make_request("POST", "/completion", data={
+        "prompt": "Unrelated text with no common prefix occupies the slot now.",
+        "id_slot": 1,
+        "cache_prompt": True,
+    })
+    assert res.status_code == 200
+
+    res = server.make_request("POST", "/slots/1?action=restore", data={
+        "filename": "swa_full_slot1.bin",
+    })
+    assert res.status_code == 200
+
+    res = server.make_request("POST", "/completion", data={
+        "prompt": prompt_b,
+        "id_slot": 1,
+        "cache_prompt": True,
+    })
+    assert res.status_code == 200
+    assert res.body["timings"]["cache_n"] == cache_live
+    assert res.body["timings"]["prompt_n"] == n_live
